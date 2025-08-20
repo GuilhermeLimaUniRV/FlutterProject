@@ -4,350 +4,285 @@ void main() {
   runApp(const MyApp());
 }
 
+/// Simples "serviço" de autenticação para demo
+class AuthService extends ChangeNotifier {
+  bool _isLoggedIn = false;
+
+  bool get isLoggedIn => _isLoggedIn;
+
+  void login() {
+    _isLoggedIn = true;
+    notifyListeners();
+  }
+
+  void logout() {
+    _isLoggedIn = false;
+    notifyListeners();
+  }
+}
+
+// Singleton simples para acessar no onGenerateRoute
+final auth = AuthService();
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Carrossel de Micro-Formulários',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
-      home: const MicroFormsCarouselPage(),
+    return AnimatedBuilder(
+      animation: auth, // reconstrói quando login/logout mudar
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Rotas Privadas Demo',
+          debugShowCheckedModeBanner: false,
+          initialRoute: '/',
+          onGenerateRoute: (settings) => AppRouter.generate(settings),
+        );
+      },
     );
   }
 }
 
-class MicroFormData {
-  final TextEditingController nameController;
-  DateTime? birthDate;
-  String? gender;
+class AppRouter {
+  static Route<dynamic> generate(RouteSettings settings) {
+    WidgetBuilder builder;
 
-  MicroFormData({String initialName = '', this.birthDate, this.gender})
-    : nameController = TextEditingController(text: initialName);
+    // Rotas privadas
+    final privateRoutes = <String>{
+      '/dashboard',
+      '/detalhes',
+    };
 
-  void dispose() {
-    nameController.dispose();
-  }
-}
+    bool isPrivate = privateRoutes.contains(settings.name);
 
-class MicroFormsCarouselPage extends StatefulWidget {
-  const MicroFormsCarouselPage({super.key});
-
-  @override
-  State<MicroFormsCarouselPage> createState() => _MicroFormsCarouselPageState();
-}
-
-class _MicroFormsCarouselPageState extends State<MicroFormsCarouselPage> {
-  final _pageController = PageController(viewportFraction: 0.85);
-  final List<GlobalKey<FormState>> _formKeys = [];
-  final List<MicroFormData> _forms = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _addForm(); // começa com um card
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    for (final f in _forms) {
-      f.dispose();
-    }
-    super.dispose();
-  }
-
-  void _addForm() {
-    setState(() {
-      _forms.add(MicroFormData(gender: null));
-      _formKeys.add(GlobalKey<FormState>());
-      // anima para o último card após adicionar
-      Future.microtask(() {
-        if (_forms.length > 1) {
-          _pageController.animateToPage(
-            _forms.length - 1,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
+    if (isPrivate && !auth.isLoggedIn) {
+      // Redireciona para login, preservando rota e argumentos desejados
+      builder = (_) => LoginPage(
+            redirectTo: settings.name!,
+            redirectArgs: settings.arguments,
           );
-        }
-      });
-    });
-  }
-
-  void _removeForm(int index) {
-    if (_forms.length == 1) return; // mantém pelo menos um
-    setState(() {
-      _forms[index].dispose();
-      _forms.removeAt(index);
-      _formKeys.removeAt(index);
-    });
-  }
-
-  Future<void> _pickDate(int index) async {
-    final now = DateTime.now();
-    final initial =
-        _forms[index].birthDate ??
-        DateTime(now.year - 18, now.month, now.day); // sugestão inicial
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(1900, 1, 1),
-      lastDate: now,
-      helpText: 'Selecione a Data de Nascimento',
-      fieldLabelText: 'Data',
-      cancelText: 'Cancelar',
-      confirmText: 'OK',
-    );
-    if (picked != null) {
-      setState(() {
-        _forms[index].birthDate = picked;
-      });
-    }
-  }
-
-  String _formatDate(DateTime? d) {
-    if (d == null) return '';
-    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
-  }
-
-  void _saveAll() {
-    // Valida todos os forms visíveis
-    bool allValid = true;
-    for (int i = 0; i < _formKeys.length; i++) {
-      final ok = _formKeys[i].currentState?.validate() ?? false;
-      allValid = allValid && ok;
-    }
-    if (!allValid) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Corrija os erros antes de salvar.')),
-      );
-      return;
+      return MaterialPageRoute(builder: builder, settings: const RouteSettings(name: '/login'));
     }
 
-    // Coleta dados
-    final collected = _forms.map((f) {
-      return {
-        'nomeCompleto': f.nameController.text.trim(),
-        'dataNascimento': f.birthDate?.toIso8601String(),
-        'sexo': f.gender,
-      };
-    }).toList();
+    switch (settings.name) {
+      case '/':
+        builder = (_) => const HomePage();
+        break;
+      case '/login':
+        final args = settings.arguments as Map<String, dynamic>?;
+        builder = (_) => LoginPage(
+              redirectTo: args != null ? args['redirectTo'] as String? : null,
+              redirectArgs: args != null ? args['redirectArgs'] : null,
+            );
+        break;
+      case '/dashboard':
+        builder = (_) => const DashboardPage();
+        break;
+      case '/detalhes':
+        builder = (_) => DetalhesPage(
+              // Esperamos um Map<String, dynamic> com os dados
+              dados: (settings.arguments ?? const <String, dynamic>{})
+                  as Map<String, dynamic>,
+            );
+        break;
+      default:
+        builder = (_) => const Scaffold(
+              body: Center(child: Text('Rota não encontrada')),
+            );
+    }
 
-    // Exemplo: mostra no console e no SnackBar
-    // Em app real, você pode enviar para API, salvar local, etc.
-    // ignore: avoid_print
-    print(collected);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Foram salvos ${collected.length} micro-formulários.'),
-      ),
-    );
+    return MaterialPageRoute(builder: builder, settings: settings);
   }
+}
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final cardWidth = MediaQuery.of(context).size.width * 0.82;
+    final userData = {
+      'nomeCompleto': 'Ana Beatriz Souza',
+      'dataNascimento': '1995-07-21',
+      'telefone': '(11) 91234-5678',
+    };
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Carrossel de Micro-Formulários'),
+        title: const Text('Home (Pública)'),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Center(
+              child: Text(
+                auth.isLoggedIn ? 'Autenticado' : 'Anônimo',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
           IconButton(
-            tooltip: 'Salvar tudo',
-            onPressed: _saveAll,
-            icon: const Icon(Icons.save),
+            icon: Icon(auth.isLoggedIn ? Icons.logout : Icons.login),
+            tooltip: auth.isLoggedIn ? 'Sair' : 'Entrar',
+            onPressed: () {
+              if (auth.isLoggedIn) {
+                auth.logout();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Logout realizado')),
+                );
+              } else {
+                Navigator.pushNamed(context, '/login');
+              }
+            },
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addForm,
-        label: const Text('Adicionar card'),
-        icon: const Icon(Icons.add),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Text(
+            'Exemplo de Rotas:',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pushNamed(context, '/dashboard');
+            },
+            child: const Text('Ir para /dashboard (PRIVADA)'),
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pushNamed(
+                context,
+                '/detalhes',
+                arguments: userData, // Passando o Map na navegação
+              );
+            },
+            child: const Text('Ir para /detalhes (PRIVADA, com Map)'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: () {
+              Navigator.pushNamed(context, '/login');
+            },
+            child: const Text('Ir para /login (PÚBLICA)'),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Dica: tente acessar as rotas privadas estando deslogado(a). '
+            'Você será redirecionado(a) para o login e, ao logar, voltará '
+            'automaticamente para a rota desejada.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class LoginPage extends StatelessWidget {
+  const LoginPage({super.key, this.redirectTo, this.redirectArgs});
+
+  final String? redirectTo;
+  final Object? redirectArgs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Login (Pública)')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Simulação de Login'),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.lock_open),
+                label: const Text('Entrar'),
+                onPressed: () {
+                  auth.login();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Login realizado')),
+                  );
+
+                  // Se havia rota alvo, volta para ela
+                  if (redirectTo != null) {
+                    Navigator.pushReplacementNamed(
+                      context,
+                      redirectTo!,
+                      arguments: redirectArgs,
+                    );
+                  } else {
+                    Navigator.pushReplacementNamed(context, '/');
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class DashboardPage extends StatelessWidget {
+  const DashboardPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Dashboard (Privada)'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () {
+              auth.logout();
+              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+            },
+          ),
+        ],
+      ),
+      body: const Center(
+        child: Text('Bem-vindo(a) ao Dashboard!'),
+      ),
+    );
+  }
+}
+
+class DetalhesPage extends StatelessWidget {
+  const DetalhesPage({super.key, required this.dados});
+
+  final Map<String, dynamic> dados;
+
+  @override
+  Widget build(BuildContext context) {
+    final nome = dados['nomeCompleto'] ?? '—';
+    final nascimento = dados['dataNascimento'] ?? '—';
+    final telefone = dados['telefone'] ?? '—';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Detalhes (Privada, com Map)'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () {
+              auth.logout();
+              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+            },
+          ),
+        ],
       ),
       body: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: PageView.builder(
-          controller: _pageController,
-          itemCount: _forms.length,
-          padEnds: false,
-          itemBuilder: (context, index) {
-            final data = _forms[index];
-            return AnimatedBuilder(
-              animation: _pageController,
-              builder: (context, child) {
-                // Efeito sutil de escala no carrossel
-                double scale = 1.0;
-                if (_pageController.position.haveDimensions) {
-                  final page =
-                      _pageController.page ??
-                      _pageController.initialPage.toDouble();
-                  final diff = (page - index).abs();
-                  scale = (1 - (diff * 0.06)).clamp(0.92, 1.0);
-                }
-                return Center(
-                  child: Transform.scale(scale: scale, child: child),
-                );
-              },
-              child: SizedBox(
-                width: cardWidth,
-                child: Card(
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Form(
-                      key: _formKeys[index],
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Cabeçalho do card
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  'Formulário ${index + 1}',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: _forms.length == 1
-                                    ? 'Não pode remover o único card'
-                                    : 'Remover este card',
-                                onPressed: _forms.length == 1
-                                    ? null
-                                    : () => _removeForm(index),
-                                icon: const Icon(Icons.delete_outline),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-
-                          // Nome Completo
-                          TextFormField(
-                            controller: data.nameController,
-                            decoration: const InputDecoration(
-                              labelText: 'Nome Completo',
-                              hintText: 'Digite o nome completo',
-                              border: OutlineInputBorder(),
-                            ),
-                            textInputAction: TextInputAction.next,
-                            validator: (value) {
-                              if (value == null || value.trim().isEmpty) {
-                                return 'Informe o nome completo';
-                              }
-                              if (value.trim().length < 3) {
-                                return 'Nome muito curto';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 12),
-
-                          // Data de Nascimento (sem pacotes externos)
-                          GestureDetector(
-                            onTap: () => _pickDate(index),
-                            child: AbsorbPointer(
-                              child: TextFormField(
-                                decoration: const InputDecoration(
-                                  labelText: 'Data de Nascimento',
-                                  hintText: 'DD/MM/AAAA',
-                                  border: OutlineInputBorder(),
-                                  suffixIcon: Icon(
-                                    Icons.calendar_today_outlined,
-                                  ),
-                                ),
-                                controller: TextEditingController(
-                                  text: _formatDate(data.birthDate),
-                                ),
-                                validator: (_) {
-                                  if (data.birthDate == null) {
-                                    return 'Selecione a data';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-
-                          // Sexo (Homem/Mulher)
-                          DropdownButtonFormField<String>(
-                            value: data.gender,
-                            decoration: const InputDecoration(
-                              labelText: 'Sexo',
-                              border: OutlineInputBorder(),
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'Homem',
-                                child: Text('Homem'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'Mulher',
-                                child: Text('Mulher'),
-                              ),
-                            ],
-                            onChanged: (v) => setState(() => data.gender = v),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) {
-                                return 'Selecione uma opção';
-                              }
-                              return null;
-                            },
-                          ),
-                          const Spacer(),
-
-                          // Ações do card (opcional)
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              TextButton(
-                                onPressed: () {
-                                  // limpa apenas este card
-                                  setState(() {
-                                    data.nameController.clear();
-                                    data.birthDate = null;
-                                    data.gender = null;
-                                  });
-                                },
-                                child: const Text('Limpar'),
-                              ),
-                              const SizedBox(width: 8),
-                              FilledButton.icon(
-                                onPressed: () {
-                                  final valid =
-                                      _formKeys[index].currentState
-                                          ?.validate() ??
-                                      false;
-                                  if (valid) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Card ${index + 1} válido.',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                },
-                                icon: const Icon(Icons.check),
-                                label: const Text('Validar'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
+        padding: const EdgeInsets.all(16),
+        child: Card(
+          child: ListTile(
+            title: Text(nome.toString()),
+            subtitle: Text('Nascimento: $nascimento\nTelefone: $telefone'),
+            leading: const Icon(Icons.person),
+          ),
         ),
       ),
     );
